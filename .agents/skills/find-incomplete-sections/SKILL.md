@@ -4,15 +4,12 @@ description: Find empty sections and sections containing TODO markers in task an
 argument-hint: "[path]"
 ---
 
-Find all incomplete sections in markdown files — either empty headings (no content below them) or sections that contain only a `<!-- TODO ... -->` comment.
+Find all incomplete sections in markdown files — either empty headings (no content below them) or sections that contain only a `<!-- TODO ... -->` comment. Writes the report to `instructors/file-reviews/incomplete-sections.md`.
 
-## Rules
+## Steps
 
-- Search in `$ARGUMENTS` if provided; otherwise search in both `lab/tasks/` and `wiki/`.
-- Only scan `.md` files.
-- A section is **empty** if no non-blank, non-heading lines appear between its heading and the next heading (or EOF).
-- A section is **TODO-only** if the only non-blank, non-heading lines between its heading and the next heading (or EOF) are `<!-- TODO ... -->` comments.
-- Use a Bash script to detect both cases.
-- Output results in the format `file.md:line: ## Section Name — (empty|TODO: <comment text>)`, one per line.
-- Group results by file.
-- After the list, print a summary: total count (split by empty vs TODO), and which files are most affected.
+1. Run the helper script from the repo root. If `$ARGUMENTS` is provided, pass it as the path argument; otherwise omit it to use the default paths (`lab/tasks/` and `wiki/`):
+   ```
+   python3 instructors/scripts/find-incomplete-sections/find-incomplete-sections.py $ARGUMENTS --output instructors/file-reviews/incomplete-sections.md
+   ```
+2. Display the contents of `instructors/file-reviews/incomplete-sections.md` to the user.
