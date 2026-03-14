@@ -16,7 +16,7 @@ LLM_MODEL = os.getenv("LLM_MODEL")
 
 # Backend API configuration
 LMS_API_KEY = os.getenv("LMS_API_KEY")
-AGENT_API_BASE_URL = os.getenv("AGENT_API_BASE_URL", "http://localhost:42002")
+AGENT_API_BASE_URL = os.getenv("AGENT_API_BASE_URL", "http://localhost:42002")  # Default Caddy port
 
 # Project root for file operations
 PROJECT_ROOT = Path(__file__).parent
