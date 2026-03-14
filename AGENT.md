@@ -31,6 +31,10 @@ Read the contents of a file from the project.
 }
 ```
 
+**Security:**
+- Blocks `..` path traversal
+- Ensures file stays inside project root
+
 **Use cases:**
 - Reading documentation from the wiki
 - Reading source code to understand implementation details
@@ -41,7 +45,7 @@ Read the contents of a file from the project.
 List files and directories in a project directory.
 
 **Parameters:**
-- `dir` (string, optional): Relative path to the directory (default: `.`)
+- `path` (string, required): Relative path to the directory (e.g., `backend/app`, `docs`)
 
 **Returns:**
 ```json
@@ -53,6 +57,10 @@ List files and directories in a project directory.
   ]
 }
 ```
+
+**Security:**
+- Blocks `..` path traversal
+- Ensures path stays inside project root
 
 **Use cases:**
 - Exploring project structure
@@ -164,7 +172,7 @@ uv run pytest tests/test_agent.py -v
 uv run pytest tests/test_agent.py::TestAgentToolImplementation -v
 
 # Run tool usage tests (requires backend running)
-uv run pytest tests/test_agent.py::TestAgentToolUsage -v
+uv run pytest tests/test_agent_e2e.py -v
 ```
 
 ## Benchmark Evaluation
@@ -217,7 +225,8 @@ The benchmark tests 10 questions across all categories:
 .
 ├── agent.py              # Main agent implementation
 ├── tests/
-│   └── test_agent.py     # Agent regression tests
+│   ├── test_agent.py     # Agent unit tests
+│   └── test_agent_e2e.py # Agent e2e tests
 ├── plans/
 │   └── task-3.md         # Implementation plan
 ├── .env.agent.secret     # LLM credentials
