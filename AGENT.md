@@ -52,3 +52,38 @@ Tests verify that:
 - stdout contains valid JSON
 - the JSON contains `answer`
 - the JSON contains `tool_calls`
+
+## Tools
+
+### read_file
+Reads a file from the repository.
+
+Parameters:
+- path (string)
+
+Security:
+- blocks "../"
+- ensures file stays inside project root
+
+
+### list_files
+Lists files in a directory.
+
+Parameters:
+- path (string)
+
+Security:
+- blocks "../"
+- ensures path stays inside project root
+
+
+## Agentic Loop
+
+1. Send user question and tool schemas to the LLM.
+2. If the LLM returns tool_calls:
+   - execute the tools
+   - append results as tool messages
+   - send results back to the LLM.
+3. If the LLM returns a text answer:
+   - return JSON with answer, source, tool_calls.
+4. Stop after 10 tool calls.
