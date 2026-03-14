@@ -71,22 +71,4 @@ class TestAgentToolImplementation:
             assert "body" in result
 
 
-class TestAgentRuns:
-    """Basic tests that the agent runs and returns valid JSON."""
-
-    def test_agent_runs(self):
-        """Test that agent runs and returns valid JSON with answer and tool_calls."""
-        result = subprocess.run(
-            [sys.executable, str(AGENT_SCRIPT), "test question"],
-            capture_output=True,
-            text=True,
-            cwd=str(AGENT_SCRIPT.parent),
-        )
-
-        assert result.returncode == 0
-
-        data = json.loads(result.stdout)
-
-        assert "answer" in data
-        assert "tool_calls" in data
-        assert isinstance(data["tool_calls"], list)
+# Note: End-to-end tests that require LLM API access are in tests/test_agent_e2e.py
