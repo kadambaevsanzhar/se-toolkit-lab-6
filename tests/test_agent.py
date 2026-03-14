@@ -1,54 +1,74 @@
+"""Regression tests for the system agent tools.
+
+These tests verify that the agent tools are implemented correctly.
+Run with: uv run pytest tests/test_agent.py -v
+
+Note: Tests that require LLM API access or running backend are in
+tests/test_agent_e2e.py (end-to-end tests).
+"""
+
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 
-def test_agent_runs():
-    result = subprocess.run(
-        [sys.executable, "agent.py", "test question"],
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0
-
-    data = json.loads(result.stdout)
-
-    assert "answer" in data
-    assert "tool_calls" in data
-    assert isinstance(data["tool_calls"], list)
-
-import json
-import subprocess
+# Path to the agent script
+AGENT_SCRIPT = Path(__file__).parent.parent / "agent.py"
 
 
-def test_merge_conflict_uses_read_file():
-    result = subprocess.run(
-        ["uv", "run", "agent.py", "How do you resolve a merge conflict?"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+class TestAgentToolImplementation:
+    """Tests for individual tool implementations."""
 
-    data = json.loads(result.stdout)
+    def test_read_file_returns_content(self):
+        """Test that read_file tool returns file content."""
+        from agent import read_file
 
-    assert "tool_calls" in data
-    assert isinstance(data["tool_calls"], list)
-    assert any(call["tool"] == "read_file" for call in data["tool_calls"])
-    assert "source" in data
-    assert "wiki/git-workflow.md" in data["source"]
+        result = read_file("README.md")
+
+        assert "path" in result
+        assert "content" in result
+        assert result["path"] == "README.md"
+        assert len(result["content"]) > 0
+
+    def test_read_file_not_found(self):
+        """Test that read_file returns error for non-existent file."""
+        from agent import read_file
+
+        result = read_file("nonexistent_file_12345.txt")
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_list_files_returns_items(self):
+        """Test that list_files tool returns directory contents."""
+        from agent import list_files
+
+        result = list_files("backend/app")
+
+        assert "directory" in result
+        assert "items" in result
+        assert len(result["items"]) > 0
+
+    def test_query_api_structure(self):
+        """Test that query_api returns expected structure (may fail without backend)."""
+        from agent import query_api
+
+        result = query_api("GET", "/items/")
+
+        # Should return either a successful response or an error
+        assert isinstance(result, dict)
+        # If backend is not running, we expect an error
+        # If backend is running, we expect status_code and body
+        if "error" in result:
+            # Connection error is expected if backend is not running
+            assert any(kw in result["error"].lower() for kw in ["connection", "refused", "error"])
+        else:
+            # Backend is running
+            assert "status_code" in result
+            assert "body" in result
 
 
-def test_list_wiki_files_uses_list_files():
-    result = subprocess.run(
-        ["uv", "run", "agent.py", "What files are in the wiki?"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    data = json.loads(result.stdout)
-
-    assert "tool_calls" in data
-    assert isinstance(data["tool_calls"], list)
-    assert any(call["tool"] == "list_files" for call in data["tool_calls"])
+# Note: End-to-end tests that require LLM API access are in tests/test_agent_e2e.py
