@@ -6,7 +6,9 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+# load env
 load_dotenv(".env.agent.secret")
+load_dotenv(".env.docker.secret")
 
 API_KEY = os.getenv("LLM_API_KEY")
 API_BASE = os.getenv("LLM_API_BASE")
@@ -14,9 +16,8 @@ MODEL = os.getenv("LLM_MODEL")
 
 PROJECT_ROOT = Path(".").resolve()
 
-
 # ------------------------
-# TOOLS
+# TOOLS IMPLEMENTATION
 # ------------------------
 
 def read_file(path: str):
@@ -51,11 +52,46 @@ def list_files(path: str):
         if not full_path.exists():
             return "Error: path not found"
 
-        entries = os.listdir(full_path)
-        return "\n".join(entries)
+        return "\n".join(os.listdir(full_path))
 
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+def query_api(method: str, path: str, body: str = None):
+    try:
+        base_url = os.getenv("AGENT_API_BASE_URL", "http://localhost:42002")
+        api_key = os.getenv("LMS_API_KEY")
+
+        url = base_url.rstrip("/") + path
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.request(
+            method=method,
+            url=url,
+            headers=headers,
+            data=body
+        )
+
+        try:
+            parsed = response.json()
+        except Exception:
+            parsed = response.text
+
+        return json.dumps({
+            "status_code": response.status_code,
+            "body": parsed
+        })
+
+    except Exception as e:
+        return json.dumps({
+            "status_code": 500,
+            "body": str(e)
+        })
 
 
 # ------------------------
@@ -67,14 +103,11 @@ tools = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file from the repository",
+            "description": "Read a file from the project repository.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative path to file"
-                    }
+                    "path": {"type": "string"}
                 },
                 "required": ["path"]
             }
@@ -84,51 +117,51 @@ tools = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "List files in a directory",
+            "description": "List files in a directory in the project.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative directory path"
-                    }
+                    "path": {"type": "string"}
                 },
                 "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_api",
+            "description": "Call the running backend API to retrieve live system data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string"},
+                    "path": {"type": "string"},
+                    "body": {"type": "string"}
+                },
+                "required": ["method", "path"]
             }
         }
     }
 ]
 
-
 # ------------------------
-# LLM CALL
+# TOOL EXECUTION
 # ------------------------
 
-def call_llm(messages):
-    if not API_KEY or not API_BASE or not MODEL:
-        raise RuntimeError("Missing LLM_API_KEY, LLM_API_BASE, or LLM_MODEL")
+def execute_tool(name, args):
+    if name == "read_file":
+        return read_file(**args)
+    if name == "list_files":
+        return list_files(**args)
+    if name == "query_api":
+        return query_api(**args)
 
-    url = f"{API_BASE.rstrip('/')}/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "tools": tools,
-    }
-
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
-    response.raise_for_status()
-
-    return response.json()
+    return f"Unknown tool {name}"
 
 
 # ------------------------
-# AGENTIC LOOP
+# AGENT LOOP
 # ------------------------
 
 def run_agent(question: str):
@@ -137,104 +170,72 @@ def run_agent(question: str):
         {
             "role": "system",
             "content": (
-                "You are a documentation agent. "
-                "Use list_files to discover wiki files, then read_file to read them. "
-                "Return the answer and include the source file path and section anchor."
-            ),
+                "You are a system agent. "
+                "Use read_file for documentation and source code. "
+                "Use list_files to explore the repository structure. "
+                "Use query_api for live backend data such as item counts or endpoint responses."
+            )
         },
-        {
-            "role": "user",
-            "content": question,
-        },
+        {"role": "user", "content": question}
     ]
 
-    tool_history = []
+    tool_calls_log = []
 
-    for _ in range(10):
+    for _ in range(6):
 
-        data = call_llm(messages)
-        message = data["choices"][0]["message"]
+        resp = requests.post(
+            f"{API_BASE}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": MODEL,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto"
+            }
+        )
 
-        tool_calls = message.get("tool_calls")
+        data = resp.json()
+        msg = data["choices"][0]["message"]
 
-        # ------------------------
-        # If LLM wants to call tools
-        # ------------------------
+        if msg.get("tool_calls"):
+            messages.append(msg)
 
-        if tool_calls:
-
-            messages.append(message)
-
-            for call in tool_calls:
-
-                tool_name = call["function"]["name"]
+            for call in msg["tool_calls"]:
+                name = call["function"]["name"]
                 args = json.loads(call["function"]["arguments"])
 
-                if tool_name == "read_file":
-                    result = read_file(**args)
+                result = execute_tool(name, args)
 
-                elif tool_name == "list_files":
-                    result = list_files(**args)
-
-                else:
-                    result = "Error: unknown tool"
-
-                tool_history.append({
-                    "tool": tool_name,
+                tool_calls_log.append({
+                    "tool": name,
                     "args": args,
                     "result": result
                 })
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": result,
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": result
+                })
 
-            continue
+        else:
+            answer = msg.get("content") or ""
+            return {
+                "answer": answer,
+                "tool_calls": tool_calls_log
+            }
 
-        # ------------------------
-        # Final answer
-        # ------------------------
-
-        answer = message.get("content", "").strip()
-
-        return {
-            "answer": answer,
-            "source": "unknown",
-            "tool_calls": tool_history,
-        }
-
-    # fallback if 10 calls reached
-
-    return {
-        "answer": "Stopped after 10 tool calls",
-        "source": "unknown",
-        "tool_calls": tool_history,
-    }
+    return {"answer": "Agent reached max iterations", "tool_calls": tool_calls_log}
 
 
 # ------------------------
 # CLI
 # ------------------------
 
-def main():
-    if len(sys.argv) < 2:
-        print('Usage: uv run agent.py "question"', file=sys.stderr)
-        sys.exit(1)
-
-    question = sys.argv[1]
-
-    try:
-        result = run_agent(question)
-        print(json.dumps(result, ensure_ascii=False))
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    main()
+    question = " ".join(sys.argv[1:])
+    result = run_agent(question)
+    print(json.dumps(result, indent=2))
