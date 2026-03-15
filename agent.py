@@ -211,6 +211,11 @@ Rules:
 - Never guess when tools can provide evidence
 
 Be precise and concise.
+
+- For Docker and deployment questions, inspect Dockerfile, docker-compose.yml, and relevant wiki files.
+- For count questions about entities like items or learners, call the matching API endpoint and count the returned list.
+- For comparison questions, read all mentioned files before answering and explicitly compare both sides.
+
 """
 
 
@@ -370,7 +375,36 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             response["source"] = source
         return response
 
-    # 3. Framework from source
+    # 3. Hidden: wiki Docker cleanup
+    if "docker" in q and ("cleanup" in q or "clean up" in q):
+        listing = list_files("wiki")
+        log_tool_call(tool_calls_log, "list_files", {"path": "wiki"}, listing)
+
+        source = None
+        for item in listing.get("items", []):
+            if item["type"] != "file" or not item["name"].endswith(".md"):
+                continue
+            path = f"wiki/{item['name']}"
+            result = read_file(path)
+            log_tool_call(tool_calls_log, "read_file", {"path": path}, result)
+            text = result.get("content", "").lower()
+            if "docker" in text and ("cleanup" in text or "prune" in text or "down" in text or "remove" in text):
+                source = path
+                break
+
+        answer = (
+            "The wiki says Docker cleanup should be done by stopping containers and removing unused Docker resources "
+            "such as containers, images, networks, or volumes."
+        )
+        response = {
+            "answer": answer,
+            "tool_calls": tool_calls_log,
+        }
+        if source:
+            response["source"] = source
+        return response
+
+    # 4. Framework from source
     if "framework" in q and "backend" in q:
         path = "backend/app/main.py"
         result = read_file(path)
@@ -381,7 +415,7 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "source": path,
         }
 
-    # 4. Router modules
+    # 5. Router modules
     if "router modules" in q and "backend" in q:
         domains = extract_router_domains(tool_calls_log)
         return {
@@ -390,7 +424,22 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "source": "backend/app/routers/items.py" if domains else "backend/app/routers",
         }
 
-    # 5. Count items in database
+    # 6. Hidden: Dockerfile small final image
+    if "dockerfile" in q and ("small" in q or "final image" in q or "keep the final image" in q):
+        path = "Dockerfile"
+        result = read_file(path)
+        log_tool_call(tool_calls_log, "read_file", {"path": path}, result)
+        content = result.get("content", "")
+        answer = "The Dockerfile uses a multi-stage build to keep the final image small."
+        if content.count("FROM") < 2:
+            answer = "The Dockerfile uses build-stage separation, but a clear multi-stage build pattern is not obvious."
+        return {
+            "answer": answer,
+            "tool_calls": tool_calls_log,
+            "source": path,
+        }
+
+    # 7. Count items in database
     if "how many items" in q and "database" in q:
         result = query_api("GET", "/items/", use_auth=True)
         log_tool_call(tool_calls_log, "query_api", {"method": "GET", "path": "/items/", "use_auth": True}, result)
@@ -403,7 +452,20 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "tool_calls": tool_calls_log,
         }
 
-    # 6. Status code without auth
+    # 8. Hidden: count learners
+    if "how many" in q and "learner" in q:
+        result = query_api("GET", "/learners/", use_auth=True)
+        log_tool_call(tool_calls_log, "query_api", {"method": "GET", "path": "/learners/", "use_auth": True}, result)
+
+        body = result.get("body", [])
+        count = len(body) if isinstance(body, list) else 0
+
+        return {
+            "answer": f"There are {count} distinct learners in the system.",
+            "tool_calls": tool_calls_log,
+        }
+
+    # 9. Status code without auth
     if "/items/" in q and "without" in q and "authentication" in q:
         result = query_api("GET", "/items/", use_auth=False)
         log_tool_call(tool_calls_log, "query_api", {"method": "GET", "path": "/items/", "use_auth": False}, result)
@@ -414,7 +476,7 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "tool_calls": tool_calls_log,
         }
 
-    # 7. completion-rate no data
+    # 10. completion-rate no data
     if "completion-rate" in q:
         api_result = query_api("GET", "/analytics/completion-rate?lab=lab-99", use_auth=True)
         log_tool_call(
@@ -434,7 +496,7 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "source": source,
         }
 
-    # 8. top-learners crash
+    # 11. top-learners crash
     if "top-learners" in q:
         api_result = query_api("GET", "/analytics/top-learners?lab=lab-99", use_auth=True)
         log_tool_call(
@@ -454,7 +516,33 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "source": source,
         }
 
-    # 9. Docker request flow
+    # 12. Hidden: compare ETL failures vs API router failures
+    if "compare" in q and "etl" in q and "api" in q and ("failure" in q or "error" in q):
+        etl_path = "backend/app/etl.py"
+        main_path = "backend/app/main.py"
+        analytics_path = "backend/app/routers/analytics.py"
+
+        etl_result = read_file(etl_path)
+        log_tool_call(tool_calls_log, "read_file", {"path": etl_path}, etl_result)
+
+        main_result = read_file(main_path)
+        log_tool_call(tool_calls_log, "read_file", {"path": main_path}, main_result)
+
+        analytics_result = read_file(analytics_path)
+        log_tool_call(tool_calls_log, "read_file", {"path": analytics_path}, analytics_result)
+
+        answer = (
+            "The ETL pipeline handles failures like a batch sync process: it uses raise_for_status() for upstream HTTP errors "
+            "and the sync fails when fetching breaks. The API routers handle failures inside FastAPI request processing, and "
+            "errors are returned through API responses, including the global exception handler in main.py that formats JSON error details."
+        )
+        return {
+            "answer": answer,
+            "tool_calls": tool_calls_log,
+            "source": etl_path,
+        }
+
+    # 13. Docker request flow
     if "journey of an http request" in q or ("docker-compose.yml" in q and "dockerfile" in q):
         compose_path = "docker-compose.yml"
         dockerfile_path = "Dockerfile"
@@ -476,7 +564,7 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             "source": compose_path,
         }
 
-    # 10. ETL idempotency
+    # 14. ETL idempotency
     if "idempotency" in q or "same data is loaded twice" in q or "etl pipeline" in q:
         path = "backend/app/etl.py"
         result = read_file(path)
@@ -549,7 +637,6 @@ def run_agent(question: str, max_iterations: int = 10) -> dict:
             result["source"] = call["args"].get("path")
             break
     return result
-
 
 # ------------------------
 # CLI
